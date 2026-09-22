@@ -3,106 +3,67 @@ const {
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder,
-  PermissionFlagsBits
+  SlashCommandBuilder
 } = require('discord.js');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
+const TOKEN = process.env.TOKEN;
+
+const GUILD_ID = '1548711365768781854';
 const OWNER_ROLE_ID = '1549055192903852142';
 
 const commands = [
   new SlashCommandBuilder()
-    .setName('generate')
-    .setDescription('Génère une clé Nethers Auth')
-    .addStringOption(option =>
-      option
-        .setName('duration')
-        .setDescription('Durée de la clé')
-        .setRequired(true)
-        .addChoices(
-          { name: '1 jour', value: '1d' },
-          { name: '7 jours', value: '7d' },
-          { name: '30 jours', value: '30d' },
-          { name: 'Lifetime', value: 'lifetime' }
-        )
-    ),
+    .setName('testowner')
+    .setDescription('Teste si tu as le rôle Owner')
+    .toJSON()
+];
 
-  new SlashCommandBuilder()
-    .setName('keys')
-    .setDescription('Affiche les clés Nethers Auth'),
-
-  new SlashCommandBuilder()
-    .setName('revoke')
-    .setDescription('Désactive une clé')
-    .addStringOption(option =>
-      option
-        .setName('key')
-        .setDescription('Clé à désactiver')
-        .setRequired(true)
-    )
-].map(command => command.toJSON());
-
-const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.once('ready', async () => {
-  console.log(`Connecté en tant que ${client.user.tag}`);
+  console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
   try {
-    console.log('Enregistrement des commandes...');
+    console.log('🔄 Enregistrement de /testowner...');
 
     await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
+      Routes.applicationGuildCommands(
+        client.user.id,
+        GUILD_ID
+      ),
+      {
+        body: commands
+      }
     );
 
-    console.log('Slash commands registered');
+    console.log('✅ /testowner enregistré !');
+
   } catch (error) {
-    console.error(error);
+    console.error('❌ Erreur :', error);
   }
 });
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  // Vérification du rôle Owner
-  const member = interaction.member;
+  if (interaction.commandName === 'testowner') {
 
-  if (!member.roles.cache.has(OWNER_ROLE_ID)) {
-    return interaction.reply({
-      content: '❌ Tu n’as pas accès à cette commande.',
-      ephemeral: true
-    });
-  }
-
-  if (interaction.commandName === 'generate') {
-    const duration = interaction.options.getString('duration');
+    if (!interaction.member.roles.cache.has(OWNER_ROLE_ID)) {
+      return interaction.reply({
+        content: '❌ Tu n’as pas le rôle Owner.',
+        ephemeral: true
+      });
+    }
 
     await interaction.reply({
-      content: `🔑 Génération d'une clé **${duration}**...`,
-      ephemeral: true
-    });
-  }
-
-  if (interaction.commandName === 'keys') {
-    await interaction.reply({
-      content: '📋 Le système de clés sera ajouté prochainement.',
-      ephemeral: true
-    });
-  }
-
-  if (interaction.commandName === 'revoke') {
-    const key = interaction.options.getString('key');
-
-    await interaction.reply({
-      content: `🗑️ La clé \`${key}\` sera révoquée.`,
+      content: '✅ Tu es Owner ! La protection fonctionne.',
       ephemeral: true
     });
   }
 });
 
-client.login(process.env.TOKEN);
+client.login(TOKEN);
