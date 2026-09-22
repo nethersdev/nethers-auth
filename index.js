@@ -1,7 +1,11 @@
+console.log("🚀 INDEX.JS EST BIEN LANCE");
+
 const {
   Client,
   GatewayIntentBits
-} = require('discord.js');
+} = require("discord.js");
+
+console.log("📦 Discord.js chargé");
 
 const client = new Client({
   intents: [
@@ -11,26 +15,28 @@ const client = new Client({
   ]
 });
 
-const OWNER_ROLE_ID = '1549055192903852142';
+console.log("🤖 Client créé");
 
-client.once('ready', () => {
-  console.log(`BOT CONNECTE : ${client.user.tag}`);
+client.once("ready", () => {
+  console.log(`✅ BOT CONNECTE : ${client.user.tag}`);
 });
 
-client.on('messageCreate', message => {
-
-  console.log(`MESSAGE RECU : ${message.content}`);
+client.on("messageCreate", (message) => {
+  console.log(`📩 MESSAGE : ${message.content}`);
 
   if (message.author.bot) return;
 
-  if (message.content === '?ping') {
-
-    if (!message.member.roles.cache.has(OWNER_ROLE_ID)) {
-      return message.reply('❌ Tu n’es pas Owner.');
-    }
-
-    message.reply('🏓 Pong Owner !');
+  if (message.content === "?ping") {
+    message.reply("🏓 Pong !");
   }
 });
 
-client.login(process.env.TOKEN);
+console.log("🔑 Tentative de connexion...");
+
+client.login(process.env.TOKEN)
+  .then(() => {
+    console.log("✅ Login réussi");
+  })
+  .catch((error) => {
+    console.error("❌ ERREUR TOKEN / LOGIN :", error);
+  });
