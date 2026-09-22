@@ -1,245 +1,220 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  Partials, 
-  SlashCommandBuilder, 
-  REST, 
-  Routes,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  PermissionFlagsBits
+const {
+  Client,
+  GatewayIntentBits
 } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.DirectMessages
-  ],
-  partials: [Partials.Channel]
+    GatewayIntentBits.MessageContent
+  ]
 });
 
-const KEYS_FILE = path.join(__dirname, 'keys.json');
+const TOKEN = process.env.TOKEN;
 
-function loadKeys() {
-  if (!fs.existsSync(KEYS_FILE)) {
-    fs.writeFileSync(KEYS_FILE, JSON.stringify({ keys: {}, panelMessageId: null, panelChannelId: null }, null, 2));
-  }
-  return JSON.parse(fs.readFileSync(KEYS_FILE, 'utf8'));
-}
+// Rôle Owner
+const OWNER_ROLE_ID = '1549055192903852142';
 
-function saveKeys(data) {
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(data, null, 2));
-}
+// Préfixe des commandes
+const PREFIX = '?';
+
+// Stockage temporaire des clés
+const keys = new Map();
 
 function generateKey() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let key = '';
-  for (let i = 0; i < 16; i++) {
-    if (i > 0 && i % 4 === 0) key += '-';
-    key += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return key;
+  const part = () =>
+    crypto.randomBytes(3).toString('hex').toUpperCase();
+
+  return `NETHERS-${part()}-${part()}-${part()}`;
 }
 
-function parseDuration(duration) {
-  if (duration === 'lifetime') return null;
-  const match = duration.match(/^(\d+)([dmy])$/);
-  if (!match) return null;
-  
-  const amount = parseInt(match[1]);
-  const unit = match[2];
-  const now = Date.now();
-  
-  if (unit === 'd') return now + amount * 24 * 60 * 60 * 1000;
-  if (unit === 'm') return now + amount * 30 * 24 * 60 * 60 * 1000;
-  if (unit === 'y') return now + amount * 365 * 24 * 60 * 60 * 1000;
-  return null;
+function hasOwnerRole(message) {
+  return message.member?.roles.cache.has(OWNER_ROLE_ID);
 }
 
-client.once('ready', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
-
-  const commands = [
-    new SlashCommandBuilder()
-      .setName('panel')
-      .setDescription('Create the control panel')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    
-    new SlashCommandBuilder()
-      .setName('deletepanel')
-      .setDescription('Delete the control panel')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    
-    new SlashCommandBuilder()
-      .setName('genkey')
-      .setDescription('Generate a key')
-      .addStringOption(opt => 
-        opt.setName('duration')
-          .setDescription('Duration (1d, 7d, 1m, 1y, lifetime)')
-          .setRequired(true)
-          .addChoices(
-            { name: '1 day', value: '1d' },
-            { name: '7 days', value: '7d' },
-            { name: '1 month', value: '1m' },
-            { name: '1 year', value: '1y' },
-            { name: 'Lifetime', value: 'lifetime' }
-          )
-      )
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    
-    new SlashCommandBuilder()
-      .setName('whitelist')
-      .setDescription('Whitelist a user and send them a key')
-      .addUserOption(opt => opt.setName('user').setDescription('User').setRequired(true))
-      .addStringOption(opt => 
-        opt.setName('duration')
-          .setDescription('Duration')
-          .setRequired(true)
-          .addChoices(
-            { name: '1 day', value: '1d' },
-            { name: '7 days', value: '7d' },
-            { name: '1 month', value: '1m' },
-            { name: '1 year', value: '1y' },
-            { name: 'Lifetime', value: 'lifetime' }
-          )
-      )
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    
-    new SlashCommandBuilder()
-      .setName('deletekey')
-      .setDescription('Delete a key')
-      .addStringOption(opt => opt.setName('key').setDescription('The key to delete').setRequired(true))
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  ].map(c => c.toJSON());
-
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  try {
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('Slash commands registered');
-  } catch (err) {
-    console.error(err);
-  }
+client.once('ready', () => {
+  console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  console.log('✅ Nethers Auth est en ligne');
 });
 
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
+client.on('messageCreate', async message => {
 
-  const data = loadKeys();
+  // Ignore les bots
+  if (message.author.bot) return;
 
-  if (interaction.isChatInputCommand()) {
-    
-    if (interaction.commandName === 'panel') {
-      const embed = new EmbedBuilder()
-        .setTitle('Nethers Auth - Control Panel')
-        .setDescription('Use the buttons below to manage your access.')
-        .setColor(0x5865F2);
+  // Ignore les messages qui ne commencent pas par ?
+  if (!message.content.startsWith(PREFIX)) return;
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('get_script').setLabel('Get Script').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('redeem').setLabel('Redeem Key').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('reset_hwid').setLabel('Reset HWID').setStyle(ButtonStyle.Secondary)
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+
+  const command = args.shift()?.toLowerCase();
+
+  // =========================
+  // PING
+  // =========================
+
+  if (command === 'ping') {
+    return message.reply('🏓 Pong !');
+  }
+
+  // =========================
+  // PROTECTION OWNER
+  // =========================
+
+  const ownerCommands = [
+    'generate',
+    'keys',
+    'revoke'
+  ];
+
+  if (ownerCommands.includes(command)) {
+
+    if (!hasOwnerRole(message)) {
+      return message.reply('❌ Tu n’as pas accès à cette commande.');
+    }
+  }
+
+  // =========================
+  // GENERATE
+  // =========================
+
+  if (command === 'generate') {
+
+    const duration = args[0]?.toLowerCase();
+
+    const durations = {
+      '1': {
+        name: '1 jour',
+        milliseconds: 24 * 60 * 60 * 1000
+      },
+
+      '7': {
+        name: '7 jours',
+        milliseconds: 7 * 24 * 60 * 60 * 1000
+      },
+
+      '30': {
+        name: '30 jours',
+        milliseconds: 30 * 24 * 60 * 60 * 1000
+      },
+
+      'lifetime': {
+        name: 'Lifetime',
+        milliseconds: null
+      }
+    };
+
+    if (!durations[duration]) {
+      return message.reply(
+        '❌ Utilisation : `?generate 1`, `?generate 7`, `?generate 30` ou `?generate lifetime`'
       );
-
-      const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
-      
-      data.panelMessageId = msg.id;
-      data.panelChannelId = interaction.channel.id;
-      saveKeys(data);
-
-      await interaction.reply({ content: 'Panel created successfully!', ephemeral: true });
     }
 
-    if (interaction.commandName === 'deletepanel') {
-      if (data.panelMessageId && data.panelChannelId) {
-        try {
-          const channel = await client.channels.fetch(data.panelChannelId);
-          const msg = await channel.messages.fetch(data.panelMessageId);
-          await msg.delete();
-        } catch (e) {}
-        data.panelMessageId = null;
-        data.panelChannelId = null;
-        saveKeys(data);
-        await interaction.reply({ content: 'Panel deleted.', ephemeral: true });
-      } else {
-        await interaction.reply({ content: 'No panel found.', ephemeral: true });
-      }
-    }
+    const key = generateKey();
 
-    if (interaction.commandName === 'genkey') {
-      const duration = interaction.options.getString('duration');
-      const key = generateKey();
-      const expires = parseDuration(duration);
+    const information = durations[duration];
 
-      data.keys[key] = {
-        key,
-        duration,
-        expires,
-        userId: null,
-        hwid: null,
-        createdAt: Date.now()
-      };
-      saveKeys(data);
+    const expiration =
+      information.milliseconds === null
+        ? null
+        : Date.now() + information.milliseconds;
 
-      await interaction.reply({ 
-        content: `Key generated:\n\`\`\`${key}\`\`\`\nDuration: **${duration}**`, 
-        ephemeral: true 
-      });
-    }
+    keys.set(key, {
+      key: key,
+      duration: information.name,
+      createdAt: Date.now(),
+      expiresAt: expiration,
+      redeemed: false,
+      discordId: null,
+      hwid: null
+    });
 
-    if (interaction.commandName === 'whitelist') {
-      const user = interaction.options.getUser('user');
-      const duration = interaction.options.getString('duration');
-      const key = generateKey();
-      const expires = parseDuration(duration);
-
-      data.keys[key] = {
-        key,
-        duration,
-        expires,
-        userId: user.id,
-        hwid: null,
-        createdAt: Date.now()
-      };
-      saveKeys(data);
-
-      try {
-        await user.send(`Here is your **Nethers Auth** key:\n\`\`\`${key}\`\`\`\nDuration: **${duration}**`);
-        await interaction.reply({ content: `Key sent in DM to ${user.tag}`, ephemeral: true });
-      } catch (e) {
-        await interaction.reply({ content: `Could not send DM. Key: \`${key}\``, ephemeral: true });
-      }
-    }
-
-    if (interaction.commandName === 'deletekey') {
-      const key = interaction.options.getString('key');
-      if (data.keys[key]) {
-        delete data.keys[key];
-        saveKeys(data);
-        await interaction.reply({ content: `Key \`${key}\` has been deleted.`, ephemeral: true });
-      } else {
-        await interaction.reply({ content: 'Key not found.', ephemeral: true });
-      }
-    }
+    return message.reply(
+      `🔑 **Clé générée**\n\n` +
+      `\`${key}\`\n\n` +
+      `⏱️ Durée : **${information.name}**`
+    );
   }
 
-  if (interaction.isButton()) {
-    if (interaction.customId === 'get_script') {
-      await interaction.reply({ content: 'Get Script feature coming soon.', ephemeral: true });
+  // =========================
+  // KEYS
+  // =========================
+
+  if (command === 'keys') {
+
+    if (keys.size === 0) {
+      return message.reply('📋 Aucune clé générée.');
     }
-    if (interaction.customId === 'redeem') {
-      await interaction.reply({ content: 'Redeem system coming soon.', ephemeral: true });
+
+    let text = '🔑 **Nethers Auth — Keys**\n\n';
+
+    for (const data of keys.values()) {
+
+      let status;
+
+      if (data.redeemed) {
+        status = '🟢 Redeemed';
+      } else {
+        status = '⚪ Disponible';
+      }
+
+      text +=
+        `\`${data.key}\`\n` +
+        `└ Durée : **${data.duration}**\n` +
+        `└ Statut : ${status}\n\n`;
     }
-    if (interaction.customId === 'reset_hwid') {
-      await interaction.reply({ content: 'Reset HWID coming soon.', ephemeral: true });
+
+    return message.reply(text);
+  }
+
+  // =========================
+  // REVOKE
+  // =========================
+
+  if (command === 'revoke') {
+
+    const key = args[0];
+
+    if (!key) {
+      return message.reply(
+        '❌ Utilisation : `?revoke NETHERS-XXXX-XXXX-XXXX`'
+      );
     }
+
+    const keyData = keys.get(key);
+
+    if (!keyData) {
+      return message.reply('❌ Cette clé n’existe pas.');
+    }
+
+    keys.delete(key);
+
+    return message.reply(
+      `🗑️ La clé \`${key}\` a été révoquée.`
+    );
+  }
+
+  // =========================
+  // HELP
+  // =========================
+
+  if (command === 'help') {
+
+    return message.reply(
+      `**Nethers Auth**\n\n` +
+      `\`?ping\` → Vérifier le bot\n` +
+      `\`?help\` → Afficher l’aide\n\n` +
+      `**Owner**\n` +
+      `\`?generate 1\` → Clé 1 jour\n` +
+      `\`?generate 7\` → Clé 7 jours\n` +
+      `\`?generate 30\` → Clé 30 jours\n` +
+      `\`?generate lifetime\` → Clé Lifetime\n` +
+      `\`?keys\` → Voir les clés\n` +
+      `\`?revoke <clé>\` → Révoquer une clé`
+    );
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(TOKEN);
